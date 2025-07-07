@@ -1,0 +1,8 @@
+FROM python:3.10-slim
+WORKDIR /app
+COPY orchestrator.py .
+COPY conf_common ./conf_common
+COPY dbuser ./dbuser
+COPY util ./util
+RUN pip install flask mysql-connector-python
+CMD ["python", "orchestrator.py"] 

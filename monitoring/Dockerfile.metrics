@@ -1,0 +1,8 @@
+FROM python:3.10-slim
+WORKDIR /app
+COPY metrics_server.py .
+COPY conf_common ./conf_common
+COPY static ./static
+RUN pip install flask psutil mysql-connector-python
+EXPOSE 6000
+CMD ["python", "metrics_server.py"] 

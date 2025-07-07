@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MySQL & System Metrics Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .row { display: flex; flex-wrap: wrap; margin-bottom: 30px; }
+    .chart-container { width: 48%; min-width: 300px; margin-right: 2%; margin-bottom: 20px; }
+    .chart-container:last-child { margin-right: 0; }
+  </style>
+</head>
+<body>
+  <h1>MySQL & System Metrics Dashboard</h1>
+  <label for="serverSelect"><b>DB 서버 선택:</b></label>
+  <select id="serverSelect"></select>
+  <label for="periodSelect" style="margin-left:20px;"><b>기간:</b></label>
+  <select id="periodSelect">
+    <option value="900">15분</option>
+    <option value="1800">30분</option>
+    <option value="3600">1시간</option>
+  </select>
+
+  <div class="row">
+    <div class="chart-container">
+      <h3>CPU Usage (%)</h3>
+      <canvas id="cpuChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Memory Usage (%)</h3>
+      <canvas id="memChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Disk Usage (%)</h3>
+      <canvas id="diskChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>MySQL Threads Connected</h3>
+      <canvas id="threadsChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>MySQL Slow Queries</h3>
+      <canvas id="slowChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Queries/s</h3>
+      <canvas id="queriesChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Com_select/s</h3>
+      <canvas id="comSelectChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Com_insert/s</h3>
+      <canvas id="comInsertChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Com_update/s</h3>
+      <canvas id="comUpdateChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Com_delete/s</h3>
+      <canvas id="comDeleteChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Innodb_rows_read/s</h3>
+      <canvas id="innodbRowsReadChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Innodb_rows_inserted/s</h3>
+      <canvas id="innodbRowsInsertedChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Innodb_rows_updated/s</h3>
+      <canvas id="innodbRowsUpdatedChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Innodb_rows_deleted/s</h3>
+      <canvas id="innodbRowsDeletedChart"></canvas>
+    </div>
+  </div>
+  <div class="row">
+    <div class="chart-container">
+      <h3>Innodb_history_list_length</h3>
+      <canvas id="innodbHistoryListChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Replication Lag (Seconds_Behind_Master)</h3>
+      <canvas id="replicationLagChart"></canvas>
+    </div>
+  </div>
+  <script>
+    // 서버별 색상 지정
+    const serverColors = [
+      'red', 'blue', 'green', 'orange', 'purple', 'brown', 'teal', 'magenta', 'navy'
+    ];
+    // 차트 객체 생성 (datasets는 동적으로)
+    const cpuChart = new Chart(document.getElementById('cpuChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}, options: {scales: {y: {min: 0, max: 100}}}});
+    const memChart = new Chart(document.getElementById('memChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}, options: {scales: {y: {min: 0, max: 100}}}});
+    const diskChart = new Chart(document.getElementById('diskChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}, options: {scales: {y: {min: 0, max: 100}}}});
+    const threadsChart = new Chart(document.getElementById('threadsChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const slowChart = new Chart(document.getElementById('slowChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    // 추가 메트릭 차트
+    const queriesChart = new Chart(document.getElementById('queriesChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const comSelectChart = new Chart(document.getElementById('comSelectChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const comInsertChart = new Chart(document.getElementById('comInsertChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const comUpdateChart = new Chart(document.getElementById('comUpdateChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const comDeleteChart = new Chart(document.getElementById('comDeleteChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const innodbRowsReadChart = new Chart(document.getElementById('innodbRowsReadChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const innodbRowsInsertedChart = new Chart(document.getElementById('innodbRowsInsertedChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const innodbRowsUpdatedChart = new Chart(document.getElementById('innodbRowsUpdatedChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const innodbRowsDeletedChart = new Chart(document.getElementById('innodbRowsDeletedChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const innodbHistoryListChart = new Chart(document.getElementById('innodbHistoryListChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+    const replicationLagChart = new Chart(document.getElementById('replicationLagChart').getContext('2d'), {type: 'line', data: {labels: [], datasets: []}});
+
+    let currentServer = null;
+    let currentPeriod = 900; // 기본 15분
+    let allServers = [];
+    let lastTimestamp = null;
+    // 변화량 계산을 위한 이전값 저장 (단일 서버 모드)
+    let prevVals = {};
+
+    // 서버 목록을 받아와서 드롭다운에 추가
+    async function loadServers() {
+      const res = await fetch('/servers');
+      const servers = await res.json();
+      allServers = servers;
+      const select = document.getElementById('serverSelect');
+      select.innerHTML = '';
+      // '전체' 옵션 추가
+      const allOpt = document.createElement('option');
+      allOpt.value = '__ALL__';
+      allOpt.textContent = '전체';
+      select.appendChild(allOpt);
+      servers.forEach(server => {
+        const opt = document.createElement('option');
+        opt.value = server;
+        opt.textContent = server;
+        select.appendChild(opt);
+      });
+      currentServer = '__ALL__';
+      select.value = currentServer;
+    }
+
+    document.getElementById('serverSelect').addEventListener('change', function(e) {
+      currentServer = e.target.value;
+      lastTimestamp = null;
+      prevVals = {};
+      fetchMetrics(true);
+    });
+    document.getElementById('periodSelect').addEventListener('change', function(e) {
+      currentPeriod = parseInt(e.target.value, 10);
+      lastTimestamp = null;
+      prevVals = {};
+      fetchMetrics(true);
+    });
+
+    // 부드러운 append/pop 방식 (단일 서버 모드)
+    function updateChartSmooth(chart, label, value, maxPoints, color, datasetLabel) {
+      if (chart.data.labels.length === 0 || chart.data.labels[chart.data.labels.length-1] !== label) {
+        chart.data.labels.push(label);
+        if (chart.data.labels.length > maxPoints) chart.data.labels.shift();
+      }
+      if (chart.data.datasets.length === 0) {
+        chart.data.datasets.push({label: datasetLabel, data: [], borderColor: color, fill: false});
+      }
+      chart.data.datasets[0].data.push(value);
+      if (chart.data.datasets[0].data.length > maxPoints) chart.data.datasets[0].data.shift();
+      chart.update('none');
+    }
+
+    // 변화량 계산 함수 (누적값 배열 → 변화량 배열)
+    function calcDeltas(arr) {
+      const deltas = [];
+      for (let i = 1; i < arr.length; ++i) {
+        deltas.push(arr[i] - arr[i-1]);
+      }
+      return deltas;
+    }
+
+    // 메트릭을 받아와서 그래프 갱신
+    async function fetchMetrics(forceFullRedraw=false) {
+      if (!currentServer) return;
+      const maxPoints = currentPeriod / 2; // INTERVAL=2초 기준
+      if (currentServer === '__ALL__') {
+        // 전체: 모든 서버의 데이터를 fetch해서 그래프에 서버별로 라인 추가 (기존 방식)
+        const now = Math.floor(Date.now() / 1000);
+        const allData = await Promise.all(allServers.map(async (server) => {
+          const res = await fetch(`/metrics?server=${encodeURIComponent(server)}`);
+          let data = await res.json();
+          data = data.filter(m => now - m.timestamp <= currentPeriod);
+          return {server, data};
+        }));
+        let maxData = allData.reduce((a, b) => (a.data.length > b.data.length ? a : b), {data: []});
+        const labels = maxData.data.map(m => new Date(m.timestamp*1000).toLocaleTimeString());
+        // 기존 메트릭
+        cpuChart.data.labels = labels;
+        cpuChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => m.system.cpu_percent),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        cpuChart.update();
+        memChart.data.labels = labels;
+        memChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => m.system.mem_percent),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        memChart.update();
+        diskChart.data.labels = labels;
+        diskChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => m.system.disk_percent),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        diskChart.update();
+        threadsChart.data.labels = labels;
+        threadsChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => (m.mysql.threads_connected || 0)),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        threadsChart.update();
+        slowChart.data.labels = labels;
+        slowChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => (m.mysql.slow_queries || 0)),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        slowChart.update();
+        // 변화량 메트릭
+        // 누적값 배열 → 변화량 배열 (서버별)
+        function allDeltaDatasets(key, colorBase) {
+          return allData.map((d, i) => {
+            const arr = d.data.map(m => (m.mysql[key] || 0));
+            const deltas = calcDeltas(arr);
+            // labels는 한 칸 짧아짐
+            return {
+              label: d.server,
+              data: deltas,
+              borderColor: serverColors[i % serverColors.length],
+              fill: false
+            };
+          });
+        }
+        // labels for delta: 한 칸 짧게
+        const deltaLabels = labels.slice(1);
+        queriesChart.data.labels = deltaLabels;
+        queriesChart.data.datasets = allDeltaDatasets('queries');
+        queriesChart.update();
+        comSelectChart.data.labels = deltaLabels;
+        comSelectChart.data.datasets = allDeltaDatasets('com_select');
+        comSelectChart.update();
+        comInsertChart.data.labels = deltaLabels;
+        comInsertChart.data.datasets = allDeltaDatasets('com_insert');
+        comInsertChart.update();
+        comUpdateChart.data.labels = deltaLabels;
+        comUpdateChart.data.datasets = allDeltaDatasets('com_update');
+        comUpdateChart.update();
+        comDeleteChart.data.labels = deltaLabels;
+        comDeleteChart.data.datasets = allDeltaDatasets('com_delete');
+        comDeleteChart.update();
+        innodbRowsReadChart.data.labels = deltaLabels;
+        innodbRowsReadChart.data.datasets = allDeltaDatasets('innodb_rows_read');
+        innodbRowsReadChart.update();
+        innodbRowsInsertedChart.data.labels = deltaLabels;
+        innodbRowsInsertedChart.data.datasets = allDeltaDatasets('innodb_rows_inserted');
+        innodbRowsInsertedChart.update();
+        innodbRowsUpdatedChart.data.labels = deltaLabels;
+        innodbRowsUpdatedChart.data.datasets = allDeltaDatasets('innodb_rows_updated');
+        innodbRowsUpdatedChart.update();
+        innodbRowsDeletedChart.data.labels = deltaLabels;
+        innodbRowsDeletedChart.data.datasets = allDeltaDatasets('innodb_rows_deleted');
+        innodbRowsDeletedChart.update();
+        // innodb_history_list_length는 현재값
+        innodbHistoryListChart.data.labels = labels;
+        innodbHistoryListChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => (m.mysql.innodb_history_list_length || 0)),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        innodbHistoryListChart.update();
+        // Replication Lag 차트
+        replicationLagChart.data.labels = labels;
+        replicationLagChart.data.datasets = allData.map((d, i) => ({
+          label: d.server,
+          data: d.data.map(m => (typeof m.mysql.replication_lag === 'number' ? m.mysql.replication_lag : null)),
+          borderColor: serverColors[i % serverColors.length],
+          fill: false
+        }));
+        replicationLagChart.update();
+        lastTimestamp = null;
+        prevVals = {};
+      } else {
+        // 단일 서버: 부드러운 append/pop 방식
+        const res = await fetch(`/metrics?server=${encodeURIComponent(currentServer)}`);
+        let data = await res.json();
+        const now = Math.floor(Date.now() / 1000);
+        data = data.filter(m => now - m.timestamp <= currentPeriod);
+        if (forceFullRedraw || lastTimestamp === null) {
+          // 전체 리셋
+          cpuChart.data.labels = [];
+          cpuChart.data.datasets = [{label: 'CPU %', data: [], borderColor: 'red', fill: false}];
+          memChart.data.labels = [];
+          memChart.data.datasets = [{label: 'Memory %', data: [], borderColor: 'blue', fill: false}];
+          diskChart.data.labels = [];
+          diskChart.data.datasets = [{label: 'Disk %', data: [], borderColor: 'green', fill: false}];
+          threadsChart.data.labels = [];
+          threadsChart.data.datasets = [{label: 'Threads Connected', data: [], borderColor: 'purple', fill: false}];
+          slowChart.data.labels = [];
+          slowChart.data.datasets = [{label: 'Slow Queries', data: [], borderColor: 'brown', fill: false}];
+          queriesChart.data.labels = [];
+          queriesChart.data.datasets = [{label: 'Queries/s', data: [], borderColor: 'red', fill: false}];
+          comSelectChart.data.labels = [];
+          comSelectChart.data.datasets = [{label: 'Com_select/s', data: [], borderColor: 'blue', fill: false}];
+          comInsertChart.data.labels = [];
+          comInsertChart.data.datasets = [{label: 'Com_insert/s', data: [], borderColor: 'green', fill: false}];
+          comUpdateChart.data.labels = [];
+          comUpdateChart.data.datasets = [{label: 'Com_update/s', data: [], borderColor: 'orange', fill: false}];
+          comDeleteChart.data.labels = [];
+          comDeleteChart.data.datasets = [{label: 'Com_delete/s', data: [], borderColor: 'purple', fill: false}];
+          innodbRowsReadChart.data.labels = [];
+          innodbRowsReadChart.data.datasets = [{label: 'Innodb_rows_read/s', data: [], borderColor: 'brown', fill: false}];
+          innodbRowsInsertedChart.data.labels = [];
+          innodbRowsInsertedChart.data.datasets = [{label: 'Innodb_rows_inserted/s', data: [], borderColor: 'teal', fill: false}];
+          innodbRowsUpdatedChart.data.labels = [];
+          innodbRowsUpdatedChart.data.datasets = [{label: 'Innodb_rows_updated/s', data: [], borderColor: 'magenta', fill: false}];
+          innodbRowsDeletedChart.data.labels = [];
+          innodbRowsDeletedChart.data.datasets = [{label: 'Innodb_rows_deleted/s', data: [], borderColor: 'navy', fill: false}];
+          innodbHistoryListChart.data.labels = [];
+          innodbHistoryListChart.data.datasets = [{label: 'Innodb_history_list_length', data: [], borderColor: 'black', fill: false}];
+          replicationLagChart.data.labels = [];
+          replicationLagChart.data.datasets = [{label: 'Replication Lag', data: [], borderColor: 'red', fill: false}];
+          prevVals = {};
+          // 전체 데이터 append (변화량은 이전값과 비교)
+          for (let i = 0; i < data.length; ++i) {
+            const m = data[i];
+            const label = new Date(m.timestamp*1000).toLocaleTimeString();
+            updateChartSmooth(cpuChart, label, m.system.cpu_percent, maxPoints, 'red', 'CPU %');
+            updateChartSmooth(memChart, label, m.system.mem_percent, maxPoints, 'blue', 'Memory %');
+            updateChartSmooth(diskChart, label, m.system.disk_percent, maxPoints, 'green', 'Disk %');
+            updateChartSmooth(threadsChart, label, (m.mysql.threads_connected || 0), maxPoints, 'purple', 'Threads Connected');
+            updateChartSmooth(slowChart, label, (m.mysql.slow_queries || 0), maxPoints, 'brown', 'Slow Queries');
+            // 변화량 메트릭
+            function delta(key, def=0) {
+              const v = (m.mysql[key] || def);
+              let d = 0;
+              if (prevVals[key] !== undefined) d = v - prevVals[key];
+              prevVals[key] = v;
+              return d;
+            }
+            if (i > 0) { // 첫 데이터는 변화량 없음
+              updateChartSmooth(queriesChart, label, delta('queries'), maxPoints, 'red', 'Queries/s');
+              updateChartSmooth(comSelectChart, label, delta('com_select'), maxPoints, 'blue', 'Com_select/s');
+              updateChartSmooth(comInsertChart, label, delta('com_insert'), maxPoints, 'green', 'Com_insert/s');
+              updateChartSmooth(comUpdateChart, label, delta('com_update'), maxPoints, 'orange', 'Com_update/s');
+              updateChartSmooth(comDeleteChart, label, delta('com_delete'), maxPoints, 'purple', 'Com_delete/s');
+              updateChartSmooth(innodbRowsReadChart, label, delta('innodb_rows_read'), maxPoints, 'brown', 'Innodb_rows_read/s');
+              updateChartSmooth(innodbRowsInsertedChart, label, delta('innodb_rows_inserted'), maxPoints, 'teal', 'Innodb_rows_inserted/s');
+              updateChartSmooth(innodbRowsUpdatedChart, label, delta('innodb_rows_updated'), maxPoints, 'magenta', 'Innodb_rows_updated/s');
+              updateChartSmooth(innodbRowsDeletedChart, label, delta('innodb_rows_deleted'), maxPoints, 'navy', 'Innodb_rows_deleted/s');
+            }
+            updateChartSmooth(innodbHistoryListChart, label, (m.mysql.innodb_history_list_length || 0), maxPoints, 'black', 'Innodb_history_list_length');
+            // Replication Lag
+            updateChartSmooth(replicationLagChart, label, (typeof m.mysql.replication_lag === 'number' ? m.mysql.replication_lag : null), maxPoints, 'red', 'Replication Lag');
+            lastTimestamp = m.timestamp;
+          }
+        } else {
+          // 새 데이터만 append
+          const newData = data.filter(m => m.timestamp > lastTimestamp);
+          newData.forEach((m, idx) => {
+            const label = new Date(m.timestamp*1000).toLocaleTimeString();
+            updateChartSmooth(cpuChart, label, m.system.cpu_percent, maxPoints, 'red', 'CPU %');
+            updateChartSmooth(memChart, label, m.system.mem_percent, maxPoints, 'blue', 'Memory %');
+            updateChartSmooth(diskChart, label, m.system.disk_percent, maxPoints, 'green', 'Disk %');
+            updateChartSmooth(threadsChart, label, (m.mysql.threads_connected || 0), maxPoints, 'purple', 'Threads Connected');
+            updateChartSmooth(slowChart, label, (m.mysql.slow_queries || 0), maxPoints, 'brown', 'Slow Queries');
+            // 변화량 메트릭
+            function delta(key, def=0) {
+              const v = (m.mysql[key] || def);
+              let d = 0;
+              if (prevVals[key] !== undefined) d = v - prevVals[key];
+              prevVals[key] = v;
+              return d;
+            }
+            if (lastTimestamp !== null) { // 첫 데이터는 변화량 없음
+              updateChartSmooth(queriesChart, label, delta('queries'), maxPoints, 'red', 'Queries/s');
+              updateChartSmooth(comSelectChart, label, delta('com_select'), maxPoints, 'blue', 'Com_select/s');
+              updateChartSmooth(comInsertChart, label, delta('com_insert'), maxPoints, 'green', 'Com_insert/s');
+              updateChartSmooth(comUpdateChart, label, delta('com_update'), maxPoints, 'orange', 'Com_update/s');
+              updateChartSmooth(comDeleteChart, label, delta('com_delete'), maxPoints, 'purple', 'Com_delete/s');
+              updateChartSmooth(innodbRowsReadChart, label, delta('innodb_rows_read'), maxPoints, 'brown', 'Innodb_rows_read/s');
+              updateChartSmooth(innodbRowsInsertedChart, label, delta('innodb_rows_inserted'), maxPoints, 'teal', 'Innodb_rows_inserted/s');
+              updateChartSmooth(innodbRowsUpdatedChart, label, delta('innodb_rows_updated'), maxPoints, 'magenta', 'Innodb_rows_updated/s');
+              updateChartSmooth(innodbRowsDeletedChart, label, delta('innodb_rows_deleted'), maxPoints, 'navy', 'Innodb_rows_deleted/s');
+            }
+            updateChartSmooth(innodbHistoryListChart, label, (m.mysql.innodb_history_list_length || 0), maxPoints, 'black', 'Innodb_history_list_length');
+            // Replication Lag
+            updateChartSmooth(replicationLagChart, label, (typeof m.mysql.replication_lag === 'number' ? m.mysql.replication_lag : null), maxPoints, 'red', 'Replication Lag');
+            lastTimestamp = m.timestamp;
+          });
+        }
+      }
+    }
+
+    setInterval(fetchMetrics, 5000);
+    loadServers().then(() => fetchMetrics(true));
+  </script>
+</body>
+</html> 
