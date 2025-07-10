@@ -2,7 +2,7 @@ import threading
 import time
 import mysql.connector
 from flask import Flask, request, jsonify
-from conf_common.config import MYSQL_USER, MYSQL_PASSWORD, MASTER_CANDIDATES, REPLICA_CANDIDATES, HEALTHCHECK_INTERVAL, FAILOVER_TIMEOUT
+from conf_common.config import MYSQL_USER, MYSQL_PASSWORD, MASTER_CANDIDATES, REPLICA_CANDIDATES, HEALTHCHECK_INTERVAL, FAILOVER_TIMEOUT, MYSQL_REPL_USER, MYSQL_REPL_PASSWORD
 
 app = Flask(__name__)
 
@@ -57,7 +57,7 @@ def reconfigure_slaves(new_master, slaves):
             cur = conn.cursor()
             cur.execute("STOP SLAVE;")
             cur.execute(f"""
-                CHANGE MASTER TO MASTER_HOST='{new_master}', MASTER_USER='{MYSQL_USER}', MASTER_PASSWORD='{MYSQL_PASSWORD}', MASTER_AUTO_POSITION=1;
+                CHANGE MASTER TO MASTER_HOST='{new_master}', MASTER_USER='{MYSQL_REPL_USER}', MASTER_PASSWORD='{MYSQL_REPL_PASSWORD}', MASTER_AUTO_POSITION=1;
             """)
             cur.execute("START SLAVE;")
             conn.commit()
@@ -95,7 +95,7 @@ def ensure_all_replicas_follow_master():
                     print(f"[Rejoin] {node}를 {master}에 레플리카로 재편입")
                     cur.execute("STOP SLAVE;")
                     cur.execute(f"""
-                        CHANGE MASTER TO MASTER_HOST='{master}', MASTER_USER='{MYSQL_USER}', MASTER_PASSWORD='{MYSQL_PASSWORD}', MASTER_AUTO_POSITION=1;
+                        CHANGE MASTER TO MASTER_HOST='{master}', MASTER_USER='{MYSQL_REPL_USER}', MASTER_PASSWORD='{MYSQL_REPL_PASSWORD}', MASTER_AUTO_POSITION=1;
                     """)
                     cur.execute("START SLAVE;")
                     conn.commit()
@@ -140,12 +140,6 @@ def healthcheck_loop():
             # 현재 시간과 마지막으로 master 서버에서 응답받은 시간의 차이가 FAILOVER_TIMEOUT을 초과할 경우 장애 조치 수행
             if time.time() - state["last_master_ok"] > FAILOVER_TIMEOUT:
                 print(f"[Failover] 마스터({master}) 장애 감지!")
-                
-                '''
-                승격할 레플리카 선택
-                반복문상의 마지막 레플리카가 응답하는 경우 이전 반복문에서 응답하지 못하는 모든 레플리카를 확인해야하므로, 불필요한 시간이 낭비된다.
-                추후 브로드캐스트 하여 가장 빠르게 응답을 전송하는 레플리카를 승격 대상으로 선정해야 한다.
-                '''
                 for candidate in state["replicas"]:
                     if is_mysql_alive(candidate):
                         # 레플리카를 마스터로 승격
@@ -156,11 +150,13 @@ def healthcheck_loop():
                         reconfigure_slaves(new_master, state["replicas"])
                         state["master"] = new_master
 
-                        # 새 레플리카 목록 갱신
-                        state["replicas"] = [h for h in MASTER_CANDIDATES if h != new_master]
+                        # 새 레플리카 목록 갱신 (이 부분은 아래에서 일괄적으로 처리)
                         state["last_master_ok"] = time.time()
                         break
-        
+
+        # 레플리카 목록을 항상 동기화
+        state["replicas"] = [h for h in MASTER_CANDIDATES if h != state["master"] and is_mysql_alive(h)]
+
         # 모든 노드가 현재 마스터를 따라가도록 한다. (보장 의도)
         ensure_all_replicas_follow_master()
 
